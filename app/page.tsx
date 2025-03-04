@@ -2,11 +2,30 @@
 
 import { useState } from 'react';
 
+// Define types for moderation results
+interface InappropriateSection {
+  text: string;
+  reason: string;
+  severity: 'low' | 'medium' | 'high';
+}
+
+interface DetailedAnalysis {
+  inappropriate_sections: InappropriateSection[];
+}
+
+interface ModerationResults {
+  flagged: boolean;
+  categories: Record<string, boolean>;
+  category_scores: Record<string, number>;
+  detailed_analysis: DetailedAnalysis;
+}
+
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [transcription, setTranscription] = useState<any>(null);
+  const [moderationResults, setModerationResults] = useState<ModerationResults | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +54,7 @@ export default function Home() {
       }
       
       setTranscription(data.transcription);
+      setModerationResults(data.moderationResults);
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');
     } finally {
@@ -46,7 +66,7 @@ export default function Home() {
     <div className="min-h-screen p-8 max-w-4xl mx-auto">
       <header className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Audio Moderation System</h1>
-        <p className="text-gray-600">Upload a YouTube video and get a transcription using Deepgram API</p>
+        <p className="text-gray-600">Upload a YouTube video and get a moderated transcription using Deepgram and OpenAI</p>
       </header>
 
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -74,7 +94,7 @@ export default function Home() {
               isLoading ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
-            {isLoading ? 'Processing...' : 'Transcribe Video'}
+            {isLoading ? 'Processing...' : 'Transcribe & Moderate Video'}
           </button>
         </form>
         
@@ -91,6 +111,63 @@ export default function Home() {
           <p className="text-gray-600">
             Processing video... This may take a few minutes depending on the video length.
           </p>
+        </div>
+      )}
+
+      {moderationResults && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4">Content Moderation Results</h2>
+          
+          <div className="space-y-4">
+            <div className="flex items-center">
+              <div className={`h-4 w-4 rounded-full mr-2 ${moderationResults.flagged ? 'bg-red-500' : 'bg-green-500'}`}></div>
+              <p className="font-medium">
+                {moderationResults.flagged 
+                  ? 'Potentially inappropriate content detected' 
+                  : 'No inappropriate content detected'}
+              </p>
+            </div>
+            
+            {moderationResults.flagged && (
+              <div>
+                <h3 className="font-medium mt-4 mb-2">Categories detected:</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(moderationResults.categories).map(([category, value]) => 
+                    value ? (
+                      <div key={category} className="bg-red-50 p-2 rounded">
+                        <p className="font-medium text-red-700 capitalize">{category.replace(/-/g, ' ')}</p>
+                        <p className="text-sm text-gray-700">
+                          Score: {(moderationResults.category_scores[category] * 100).toFixed(2)}%
+                        </p>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {moderationResults.detailed_analysis?.inappropriate_sections?.length > 0 && (
+              <div className="mt-4">
+                <h3 className="font-medium mb-2">Detailed Analysis:</h3>
+                {moderationResults.detailed_analysis.inappropriate_sections.map((section: InappropriateSection, index: number) => (
+                  <div key={index} className="border-l-4 border-red-500 pl-3 py-2 mb-3 bg-red-50">
+                    <p className="font-medium">{section.text}</p>
+                    <p className="text-sm text-gray-700">Reason: {section.reason}</p>
+                    <div className="flex items-center mt-1">
+                      <span className="text-xs font-medium mr-2">Severity:</span>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        section.severity === 'high' ? 'bg-red-600 text-white' :
+                        section.severity === 'medium' ? 'bg-orange-500 text-white' :
+                        'bg-yellow-400 text-gray-800'
+                      }`}>
+                        {section.severity.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

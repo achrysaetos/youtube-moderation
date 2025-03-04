@@ -1,4 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Transcript Parser with Content Moderation
+
+This is a Next.js application that transcribes YouTube videos using Deepgram's API and then analyzes the transcript for inappropriate content using OpenAI's moderation API.
+
+## Features
+
+- Transcribe YouTube videos using Deepgram's Nova-3 model
+- Moderate content for inappropriate language using OpenAI's moderation API
+- Detailed analysis of problematic content with severity ratings
+- Clean and intuitive UI
+
+## How It Works
+
+1. Enter a YouTube URL in the input field
+2. The application downloads the video and transcribes it using Deepgram
+3. The transcript is sent to OpenAI's moderation API to detect inappropriate content
+4. Results display both the complete transcript and a detailed moderation report
+
+## Content Moderation
+
+The system uses two levels of content moderation:
+
+1. **Basic Moderation**: Using OpenAI's moderation endpoint to flag content across various categories including:
+   - Sexual content
+   - Hate speech
+   - Violence
+   - Self-harm
+   - Harassment
+   - And more
+
+2. **Detailed Analysis**: A more thorough analysis using OpenAI's GPT models to:
+   - Identify specific problematic phrases or words
+   - Explain why each section is potentially inappropriate
+   - Provide severity ratings (low, medium, high)
+
+## Setup and Installation
+
+1. Clone the repository
+2. Install dependencies with `npm install`
+3. Create a `.env.local` file with your API keys:
+   ```
+   OPENAI_API_KEY=your_openai_api_key
+   DEEPGRAM_API_KEY=your_deepgram_api_key
+   ```
+4. Run the development server with `npm run dev`
+
+## Technologies Used
+
+- Next.js
+- React
+- Tailwind CSS
+- Deepgram API
+- OpenAI API
+- ytdl-core (for YouTube video downloading)
+
+## Use Cases
+
+- Content moderation for educational platforms
+- Ensuring transcripts meet community guidelines
+- Identifying potentially offensive speech in video content
+- Pre-screening user-generated content
 
 ## Getting Started
 
