@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
+// Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -9,27 +10,20 @@ export async function POST(request: NextRequest) {
   try {
     const { transcript } = await request.json();
 
-    const addendum = "";
-
     if (!transcript) {
       return NextResponse.json({ error: 'Transcript is required' }, { status: 400 });
     }
 
-    console.log(transcript);
-
     // Use OpenAI's moderation endpoint to check for inappropriate content
     const moderationResponse = await openai.moderations.create({
       model: "omni-moderation-latest",
-      input: transcript + addendum,
+      input: transcript,
     });
-
-    console.log(JSON.stringify(moderationResponse));
 
     const results = moderationResponse.results[0];
     const flagged = results.flagged;
 
-    // For a more detailed analysis, let's also use the Chat API to get specific feedback
-    // about what might be inappropriate and highlight those sections
+    // Get more detailed analysis with GPT for flagged content
     const detailedAnalysis = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -39,13 +33,15 @@ export async function POST(request: NextRequest) {
         },
         {
           role: "user",
-          content: `Analyze this transcript for inappropriate language: "${transcript+addendum}". If inappropriate language is found, respond with a JSON object that includes the following: 1) inappropriate_sections: an array of objects with "text" (the inappropriate text), "reason" (why it's inappropriate), and "severity" (low/medium/high). If no inappropriate language is found, return an empty array.`
+          content: `Analyze this transcript for inappropriate language: "${transcript}". If inappropriate language is found, respond with a JSON object that includes the following: 1) inappropriate_sections: an array of objects with "text" (the inappropriate text), "reason" (why it's inappropriate), and "severity" (low/medium/high). If no inappropriate language is found, return an empty array.`
         }
       ],
       response_format: { type: "json_object" }
     });
 
-    const analysisResult = JSON.parse(detailedAnalysis.choices[0].message.content);
+    // Parse the analysis result with null check and default value
+    const content = detailedAnalysis.choices[0].message.content;
+    const analysisResult = content ? JSON.parse(content) : { inappropriate_sections: [] };
 
     return NextResponse.json({
       flagged,
@@ -56,7 +52,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Moderation error:', error);
     return NextResponse.json(
-      { error: 'Failed to moderate content. Please try again later.' },
+      { error: 'Failed to moderate content', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }

@@ -2,25 +2,22 @@
 
 import { useState, useEffect, useRef } from 'react';
 
-// Define types for moderation results
+// Define types for moderation and transcription
 interface InappropriateSection {
   text: string;
   reason: string;
   severity: 'low' | 'medium' | 'high';
 }
 
-interface DetailedAnalysis {
-  inappropriate_sections: InappropriateSection[];
-}
-
 interface ModerationResults {
   flagged: boolean;
   categories: Record<string, boolean>;
   category_scores: Record<string, number>;
-  detailed_analysis: DetailedAnalysis;
+  detailed_analysis: {
+    inappropriate_sections: InappropriateSection[];
+  };
 }
 
-// Define types for transcription data
 interface TranscriptionWord {
   word: string;
   start: number;
@@ -29,38 +26,24 @@ interface TranscriptionWord {
   punctuated_word: string;
 }
 
-interface Paragraph {
-  text: string;
-  start: number;
-  end: number;
-}
-
-interface Paragraphs {
-  paragraphs: Paragraph[];
-}
-
-interface Alternative {
-  transcript: string;
-  confidence: number;
-  words: TranscriptionWord[];
-  paragraphs?: Paragraphs;
-}
-
-interface Channel {
-  alternatives: Alternative[];
-}
-
 interface TranscriptionResponse {
-  channels: Channel[];
+  channels: Array<{
+    alternatives: Array<{
+      transcript: string;
+      confidence: number;
+      words: TranscriptionWord[];
+      paragraphs?: {
+        paragraphs: Array<{
+          text: string;
+          start: number;
+          end: number;
+        }>;
+      };
+    }>;
+  }>;
 }
 
-// Add types for the audio player
-interface AudioPlayerProps {
-  audioUrl: string;
-  activeTimestamp: number | null;
-}
-
-// Add a type for WaveSurfer to fix linting issues
+// WaveSurfer type
 type WaveSurferType = {
   load: (url: string) => void;
   on: (event: string, callback: () => void) => void;
@@ -72,8 +55,8 @@ type WaveSurferType = {
   seekTo: (progress: number) => void;
 };
 
-// Create the AudioPlayer component using wavesurfer.js
-function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
+// Audio player component
+function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTimestamp: number | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurferType | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -88,10 +71,8 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
       if (!containerRef.current) return;
       
       try {
-        // Dynamically import wavesurfer.js
         const WaveSurfer = (await import('wavesurfer.js')).default;
         
-        // Create WaveSurfer instance with type assertion for options
         wavesurfer = WaveSurfer.create({
           container: containerRef.current,
           waveColor: '#4F46E5',
@@ -106,34 +87,20 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
           responsive: true,
         }) as WaveSurferType;
         
-        // Load audio
         wavesurfer.load(audioUrl);
         
-        // Set up event handlers
         wavesurfer.on('ready', () => {
           wavesurferRef.current = wavesurfer;
-          if (wavesurfer) {
-            setDuration(wavesurfer.getDuration());
-          }
+          if (wavesurfer) setDuration(wavesurfer.getDuration());
         });
         
         wavesurfer.on('audioprocess', () => {
-          if (wavesurfer) {
-            setCurrentTime(wavesurfer.getCurrentTime());
-          }
+          if (wavesurfer) setCurrentTime(wavesurfer.getCurrentTime());
         });
         
-        wavesurfer.on('play', () => {
-          setIsPlaying(true);
-        });
-        
-        wavesurfer.on('pause', () => {
-          setIsPlaying(false);
-        });
-        
-        wavesurfer.on('finish', () => {
-          setIsPlaying(false);
-        });
+        wavesurfer.on('play', () => setIsPlaying(true));
+        wavesurfer.on('pause', () => setIsPlaying(false));
+        wavesurfer.on('finish', () => setIsPlaying(false));
       } catch (err) {
         console.error('Error initializing WaveSurfer:', err);
       }
@@ -141,7 +108,6 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
     
     initWavesurfer();
     
-    // Clean up
     return () => {
       if (wavesurfer) {
         try {
@@ -164,7 +130,6 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
   // Play/pause toggle
   const togglePlayPause = () => {
     if (!wavesurferRef.current) return;
-    
     if (isPlaying) {
       wavesurferRef.current.pause();
     } else {
@@ -175,10 +140,8 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
   return (
     <div className="bg-white rounded-lg shadow-md p-6 mb-6">
       <h2 className="text-xl font-semibold mb-4">Audio Player</h2>
-      
       <div className="mb-4">
         <div ref={containerRef} className="mb-3" />
-        
         <div className="flex items-center justify-between">
           <button 
             onClick={togglePlayPause}
@@ -186,7 +149,6 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
           >
             {isPlaying ? 'Pause' : 'Play'}
           </button>
-          
           <div className="text-gray-600">
             {formatTimestamp(currentTime)} / {formatTimestamp(duration)}
           </div>
@@ -196,32 +158,117 @@ function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
   );
 }
 
+// Helper function to format timestamps from seconds to MM:SS format
+function formatTimestamp(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+// Levenshtein distance for fuzzy matching
+function levenshteinDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const matrix = Array(a.length + 1).fill(null).map(() => Array(b.length + 1).fill(null));
+
+  for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return matrix[a.length][b.length];
+}
+
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [transcription, setTranscription] = useState<TranscriptionResponse | null>(null);
   const [moderationResults, setModerationResults] = useState<ModerationResults | null>(null);
-  // Add state for the audio URL
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  // Add state for the currently active timestamp
   const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
 
-  // Set up an effect to handle direct timestamp navigation
+  // Handle timestamp navigation events
   useEffect(() => {
     const handleTimestampNavigation = (event: Event) => {
       const customEvent = event as CustomEvent;
-      // Instead of storing all metadata, we just need the timestamp
       setActiveTimestamp(customEvent.detail.time);
     };
 
     document.addEventListener('navigate-to-timestamp', handleTimestampNavigation);
-    
-    return () => {
-      document.removeEventListener('navigate-to-timestamp', handleTimestampNavigation);
-    };
+    return () => document.removeEventListener('navigate-to-timestamp', handleTimestampNavigation);
   }, []);
 
+  // Function to find timestamp boundaries for a search phrase
+  function findTimestampsForPhrase(phrase: string, words: TranscriptionWord[]): { start: number, end: number } | null {
+    if (!words?.length) return null;
+
+    // Prepare the phrase for matching
+    const normalizedPhrase = phrase.toLowerCase().replace(/[.,?!;:'"]/g, ' ').replace(/\s+/g, ' ').trim();
+    const phraseWords = normalizedPhrase.split(' ');
+    if (!phraseWords.length) return null;
+
+    // Preprocess words for faster matching
+    const normalizedWords = words.map(w => ({
+      ...w,
+      normalized: w.word.toLowerCase().replace(/[.,?!;:'"]/g, '')
+    }));
+    
+    // Find phrase in transcript
+    for (let i = 0; i <= normalizedWords.length - phraseWords.length; i++) {
+      let matchCount = 0;
+      let fuzzyMatched = false;
+      
+      for (let j = 0; j < phraseWords.length; j++) {
+        const wordIndex = i + j;
+        if (wordIndex >= normalizedWords.length) break;
+        
+        const transcriptWord = normalizedWords[wordIndex].normalized;
+        const phraseWord = phraseWords[j];
+        
+        // Check for exact or fuzzy match
+        if (transcriptWord === phraseWord) {
+          matchCount++;
+          continue;
+        }
+        
+        if (
+          transcriptWord.includes(phraseWord) || 
+          phraseWord.includes(transcriptWord) ||
+          levenshteinDistance(transcriptWord, phraseWord) <= Math.min(2, Math.floor(phraseWord.length / 3))
+        ) {
+          matchCount++;
+          fuzzyMatched = true;
+          continue;
+        }
+        
+        break;
+      }
+      
+      // If we've matched all words (or at least 80% for fuzzy matching)
+      const threshold = fuzzyMatched ? 0.8 * phraseWords.length : phraseWords.length;
+      if (matchCount >= threshold) {
+        return {
+          start: words[i].start,
+          end: words[i + matchCount - 1].end
+        };
+      }
+    }
+    
+    return null;
+  }
+
+  // Submit handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -240,9 +287,7 @@ export default function Home() {
     try {
       const response = await fetch('/api/transcribe', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ youtubeUrl }),
       });
       
@@ -263,102 +308,6 @@ export default function Home() {
     }
   };
 
-  // Function to find timestamp boundaries for a search phrase
-  function findTimestampsForPhrase(phrase: string, words: TranscriptionWord[]): { start: number, end: number } | null {
-    if (!words || !words.length) return null;
-
-    // Prepare the phrase for matching
-    const normalizedPhrase = phrase.toLowerCase().replace(/[.,?!;:'"]/g, ' ').replace(/\s+/g, ' ').trim();
-    const phraseWords = normalizedPhrase.split(' ');
-    
-    // If the phrase is empty after normalization, return null
-    if (phraseWords.length === 0) return null;
-
-    // Preprocess all transcript words for faster matching
-    const normalizedWords = words.map(w => ({
-      ...w,
-      normalized: w.word.toLowerCase().replace(/[.,?!;:'"]/g, '')
-    }));
-    
-    // Try to find the start of the phrase
-    for (let i = 0; i <= normalizedWords.length - phraseWords.length; i++) {
-      let matchCount = 0;
-      let fuzzyMatched = false;
-      
-      // Check each word in the phrase
-      for (let j = 0; j < phraseWords.length; j++) {
-        const wordIndex = i + j;
-        if (wordIndex >= normalizedWords.length) break;
-        
-        const transcriptWord = normalizedWords[wordIndex].normalized;
-        const phraseWord = phraseWords[j];
-        
-        // Exact match
-        if (transcriptWord === phraseWord) {
-          matchCount++;
-          continue;
-        }
-        
-        // Fuzzy match - consider it a match if:
-        // 1. The transcript word contains the phrase word
-        // 2. Or the phrase word contains the transcript word
-        // 3. Or the Levenshtein distance is small
-        if (
-          transcriptWord.includes(phraseWord) || 
-          phraseWord.includes(transcriptWord) ||
-          levenshteinDistance(transcriptWord, phraseWord) <= Math.min(2, Math.floor(phraseWord.length / 3))
-        ) {
-          matchCount++;
-          fuzzyMatched = true;
-          continue;
-        }
-        
-        // If we've reached here, this word doesn't match
-        break;
-      }
-      
-      // If we've matched all words in the phrase (or at least 80% for fuzzy matching)
-      const threshold = fuzzyMatched ? 0.8 * phraseWords.length : phraseWords.length;
-      if (matchCount >= threshold) {
-        return {
-          start: words[i].start,
-          end: words[i + matchCount - 1].end
-        };
-      }
-    }
-    
-    return null;
-  }
-  
-  // Helper function to calculate Levenshtein distance between two strings
-  function levenshteinDistance(a: string, b: string): number {
-    if (a.length === 0) return b.length;
-    if (b.length === 0) return a.length;
-  
-    const matrix = Array(a.length + 1).fill(null).map(() => Array(b.length + 1).fill(null));
-  
-    for (let i = 0; i <= a.length; i++) {
-      matrix[i][0] = i;
-    }
-  
-    for (let j = 0; j <= b.length; j++) {
-      matrix[0][j] = j;
-    }
-  
-    for (let i = 1; i <= a.length; i++) {
-      for (let j = 1; j <= b.length; j++) {
-        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + cost
-        );
-      }
-    }
-  
-    return matrix[a.length][b.length];
-  }
-
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto">
       <header className="mb-8">
@@ -368,7 +317,6 @@ export default function Home() {
 
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4">Transcribe YouTube Video</h2>
-        
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="youtube-url" className="block text-sm font-medium text-gray-700 mb-1">
@@ -383,7 +331,6 @@ export default function Home() {
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          
           <button
             type="submit"
             disabled={isLoading}
@@ -402,13 +349,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* Add the AudioPlayer if we have an audio URL */}
-      {audioUrl && (
-        <AudioPlayer 
-          audioUrl={audioUrl} 
-          activeTimestamp={activeTimestamp} 
-        />
-      )}
+      {audioUrl && <AudioPlayer audioUrl={audioUrl} activeTimestamp={activeTimestamp} />}
 
       {isLoading && (
         <div className="text-center p-8">
@@ -422,17 +363,7 @@ export default function Home() {
       {moderationResults && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">Content Moderation Results</h2>
-          
           <div className="space-y-4">
-            {/* <div className="flex items-center">
-              <div className={`h-4 w-4 rounded-full mr-2 ${moderationResults.flagged ? 'bg-red-500' : 'bg-green-500'}`}></div>
-              <p className="font-medium">
-                {moderationResults.flagged 
-                  ? 'Potentially inappropriate content detected' 
-                  : 'No inappropriate content detected'}
-              </p>
-            </div> */}
-            
             {moderationResults.flagged && (
               <div>
                 <h3 className="font-medium mt-4 mb-2">Categories detected:</h3>
@@ -454,7 +385,7 @@ export default function Home() {
             {moderationResults.detailed_analysis?.inappropriate_sections?.length > 0 && (
               <div className="mt-4">
                 <h3 className="font-medium mb-2">Detailed Analysis:</h3>
-                {moderationResults.detailed_analysis.inappropriate_sections.map((section: InappropriateSection, index: number) => (
+                {moderationResults.detailed_analysis.inappropriate_sections.map((section, index) => (
                   <div key={index} className="border-l-4 border-red-500 pl-3 py-2 mb-3 bg-red-50">
                     <p className="font-medium">{section.text}</p>
                     <p className="text-sm text-gray-700">Reason: {section.reason}</p>
@@ -479,48 +410,36 @@ export default function Home() {
       {transcription && (
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4">Transcription Results</h2>
-
           {(() => {
             const transcript = transcription.channels?.[0]?.alternatives?.[0]?.transcript || "";
-            const searchPhrases = moderationResults?.detailed_analysis?.inappropriate_sections?.map((section: InappropriateSection) => section.text) || [];
+            const searchPhrases = moderationResults?.detailed_analysis?.inappropriate_sections?.map(section => section.text) || [];
             
             if (searchPhrases.length > 0) {
-              // Create a regex pattern that matches any of the search phrases
+              // Create regex pattern for search phrases
               const escapedPhrases = searchPhrases.map(phrase => phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
               const pattern = new RegExp(`(${escapedPhrases.join('|')})`, 'g');
-              
-              // Split the transcript by the pattern and keep the matches
               const parts = transcript.split(pattern);
-              
-              // Get the words array for timestamp lookup
               const words = transcription.channels?.[0]?.alternatives?.[0]?.words || [];
               
               return (
                 <div>
-                  {parts.map((part: string, index: number) => {
-                    // Check if this part is one of our search phrases
+                  {parts.map((part, index) => {
                     const isSearchPhrase = searchPhrases.includes(part);
                     
                     if (isSearchPhrase) {
-                      // Find timestamps for this phrase
                       const timestamps = findTimestampsForPhrase(part, words);
-                      console.log(timestamps);
                       return (
                         <span 
                           key={index} 
                           className="relative group inline-block"
                           onClick={() => {
                             if (timestamps) {
-                              // Determine which flagged section this is
                               const sectionIndex = searchPhrases.indexOf(part);
                               const section = moderationResults?.detailed_analysis?.inappropriate_sections?.[sectionIndex];
                               
-                              // Create an event to navigate audio to this timestamp if we have an audio player
                               const timestampEvent = new CustomEvent('navigate-to-timestamp', {
                                 detail: { 
                                   time: timestamps.start,
-                                  // We still send these details for debugging purposes
-                                  // but we won't use them for displaying a component
                                   text: part,
                                   reason: section?.reason || 'Flagged content',
                                   severity: section?.severity || 'medium'
@@ -539,7 +458,7 @@ export default function Home() {
                           </span>
                           {timestamps && (
                             <span className="absolute -top-8 left-0 bg-gray-800 text-white px-2 py-1 text-xs rounded 
-                                           opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
+                                         opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
                               <span className="font-semibold">Time:</span> {formatTimestamp(timestamps.start)} - {formatTimestamp(timestamps.end)}
                               <span className="absolute w-2 h-2 bg-gray-800 transform rotate-45 left-3 -bottom-1"></span>
                             </span>
@@ -556,16 +475,8 @@ export default function Home() {
               return transcript;
             }
           })()}
-          
         </div>
       )}
     </div>
   );
-}
-
-// Helper function to format timestamps from seconds to MM:SS format
-function formatTimestamp(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.floor(seconds % 60);
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
