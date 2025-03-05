@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 // Define types for moderation results
 interface InappropriateSection {
@@ -60,6 +60,27 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [transcription, setTranscription] = useState<TranscriptionResponse | null>(null);
   const [moderationResults, setModerationResults] = useState<ModerationResults | null>(null);
+  // Add state for the currently active timestamp
+  const [activeTimestamp, setActiveTimestamp] = useState<{
+    time: number;
+    text: string;
+    reason: string;
+    severity: string;
+  } | null>(null);
+
+  // Set up an effect to listen for timestamp navigation events
+  useEffect(() => {
+    const handleTimestampNavigation = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      setActiveTimestamp(customEvent.detail);
+    };
+
+    document.addEventListener('navigate-to-timestamp', handleTimestampNavigation);
+    
+    return () => {
+      document.removeEventListener('navigate-to-timestamp', handleTimestampNavigation);
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,42 +122,96 @@ export default function Home() {
   function findTimestampsForPhrase(phrase: string, words: TranscriptionWord[]): { start: number, end: number } | null {
     if (!words || !words.length) return null;
 
-    // Convert to lowercase for case-insensitive matching
-    const lowerPhrase = phrase.toLowerCase();
+    // Prepare the phrase for matching
+    const normalizedPhrase = phrase.toLowerCase().replace(/[.,?!;:'"]/g, ' ').replace(/\s+/g, ' ').trim();
+    const phraseWords = normalizedPhrase.split(' ');
     
-    // Split the phrase into individual words
-    const phraseWords = lowerPhrase.split(/\s+/);
+    // If the phrase is empty after normalization, return null
+    if (phraseWords.length === 0) return null;
+
+    // Preprocess all transcript words for faster matching
+    const normalizedWords = words.map(w => ({
+      ...w,
+      normalized: w.word.toLowerCase().replace(/[.,?!;:'"]/g, '')
+    }));
     
-    for (let i = 0; i <= words.length - phraseWords.length; i++) {
-      let match = true;
+    // Try to find the start of the phrase
+    for (let i = 0; i <= normalizedWords.length - phraseWords.length; i++) {
+      let matchCount = 0;
+      let fuzzyMatched = false;
       
-      // Try to match consecutive words
+      // Check each word in the phrase
       for (let j = 0; j < phraseWords.length; j++) {
         const wordIndex = i + j;
-        if (wordIndex >= words.length) {
-          match = false;
-          break;
+        if (wordIndex >= normalizedWords.length) break;
+        
+        const transcriptWord = normalizedWords[wordIndex].normalized;
+        const phraseWord = phraseWords[j];
+        
+        // Exact match
+        if (transcriptWord === phraseWord) {
+          matchCount++;
+          continue;
         }
         
-        // Compare after removing punctuation
-        const currentWord = words[wordIndex].word.toLowerCase().replace(/[.,?!;:'"]/g, '');
-        const phraseWord = phraseWords[j].replace(/[.,?!;:'"]/g, '');
-        
-        if (currentWord !== phraseWord) {
-          match = false;
-          break;
+        // Fuzzy match - consider it a match if:
+        // 1. The transcript word contains the phrase word
+        // 2. Or the phrase word contains the transcript word
+        // 3. Or the Levenshtein distance is small
+        if (
+          transcriptWord.includes(phraseWord) || 
+          phraseWord.includes(transcriptWord) ||
+          levenshteinDistance(transcriptWord, phraseWord) <= Math.min(2, Math.floor(phraseWord.length / 3))
+        ) {
+          matchCount++;
+          fuzzyMatched = true;
+          continue;
         }
+        
+        // If we've reached here, this word doesn't match
+        break;
       }
       
-      if (match) {
+      // If we've matched all words in the phrase (or at least 80% for fuzzy matching)
+      const threshold = fuzzyMatched ? 0.8 * phraseWords.length : phraseWords.length;
+      if (matchCount >= threshold) {
         return {
           start: words[i].start,
-          end: words[i + phraseWords.length - 1].end
+          end: words[i + matchCount - 1].end
         };
       }
     }
     
     return null;
+  }
+  
+  // Helper function to calculate Levenshtein distance between two strings
+  function levenshteinDistance(a: string, b: string): number {
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+  
+    const matrix = Array(a.length + 1).fill(null).map(() => Array(b.length + 1).fill(null));
+  
+    for (let i = 0; i <= a.length; i++) {
+      matrix[i][0] = i;
+    }
+  
+    for (let j = 0; j <= b.length; j++) {
+      matrix[0][j] = j;
+    }
+  
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
+      }
+    }
+  
+    return matrix[a.length][b.length];
   }
 
   return (
@@ -181,6 +256,59 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Add the TimestampNavigator component */}
+      {activeTimestamp && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6 border-l-4 border-yellow-500">
+          <h2 className="text-xl font-semibold mb-2">
+            <span className="flex items-center">
+              <span className="mr-2">🔍</span> 
+              Current Highlight
+            </span>
+          </h2>
+          
+          <div className="mb-3">
+            <p className="font-medium text-gray-700 mb-1">
+              <span className="bg-yellow-200 px-2 py-1 rounded">{activeTimestamp.text}</span>
+            </p>
+            <p className="text-sm text-gray-600 mb-1">
+              <span className="font-semibold">Timestamp:</span> {formatTimestamp(activeTimestamp.time)}
+            </p>
+            <p className="text-sm text-gray-600 mb-1">
+              <span className="font-semibold">Reason:</span> {activeTimestamp.reason}
+            </p>
+            <div className="flex items-center">
+              <span className="text-sm font-semibold text-gray-600 mr-2">Severity:</span>
+              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                activeTimestamp.severity === 'high' ? 'bg-red-600 text-white' :
+                activeTimestamp.severity === 'medium' ? 'bg-yellow-500 text-white' :
+                'bg-yellow-200 text-gray-800'
+              }`}>
+                {activeTimestamp.severity.charAt(0).toUpperCase() + activeTimestamp.severity.slice(1)}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => {
+                // Here you would typically control an audio/video player
+                // For now, we just clear the active timestamp
+                setActiveTimestamp(null);
+              }}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              Play from this point
+            </button>
+            <button 
+              onClick={() => setActiveTimestamp(null)}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
 
       {isLoading && (
         <div className="text-center p-8">
@@ -278,12 +406,40 @@ export default function Home() {
                       const timestamps = findTimestampsForPhrase(part, words);
                       console.log(timestamps);
                       return (
-                        <span key={index} className="relative group">
-                          <span className="bg-yellow-300 font-bold">{part}</span>
+                        <span 
+                          key={index} 
+                          className="relative group inline-block"
+                          onClick={() => {
+                            if (timestamps) {
+                              // Determine which flagged section this is
+                              const sectionIndex = searchPhrases.indexOf(part);
+                              const section = moderationResults?.detailed_analysis?.inappropriate_sections?.[sectionIndex];
+                              
+                              // Create an event to navigate audio to this timestamp if we have an audio player
+                              const timestampEvent = new CustomEvent('navigate-to-timestamp', {
+                                detail: { 
+                                  time: timestamps.start,
+                                  text: part,
+                                  reason: section?.reason || 'Flagged content',
+                                  severity: section?.severity || 'medium'
+                                }
+                              });
+                              document.dispatchEvent(timestampEvent);
+                            }
+                          }}
+                        >
+                          <span className={`
+                            bg-yellow-300 font-medium px-1 rounded cursor-pointer
+                            ${timestamps ? 'hover:bg-yellow-400' : ''}
+                            transition-colors duration-200
+                          `}>
+                            {part}
+                          </span>
                           {timestamps && (
-                            <span className="absolute bottom-full left-0 bg-gray-800 text-white px-2 py-1 text-xs rounded 
-                                            opacity-0 group-hover:opacity-100 transition-opacity">
-                              {formatTimestamp(timestamps.start)} - {formatTimestamp(timestamps.end)}
+                            <span className="absolute -top-8 left-0 bg-gray-800 text-white px-2 py-1 text-xs rounded 
+                                           opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
+                              <span className="font-semibold">Time:</span> {formatTimestamp(timestamps.start)} - {formatTimestamp(timestamps.end)}
+                              <span className="absolute w-2 h-2 bg-gray-800 transform rotate-45 left-3 -bottom-1"></span>
                             </span>
                           )}
                         </span>
@@ -299,21 +455,6 @@ export default function Home() {
             }
           })()}
           
-          <div className="space-y-4">
-            {transcription.channels?.[0]?.alternatives?.[0]?.paragraphs?.paragraphs?.map((paragraph: Paragraph, index: number) => (
-              <div key={index} className="border-b pb-2">
-                <p>{paragraph.text}</p>
-                <p className="text-sm text-gray-500">
-                  {formatTimestamp(paragraph.start)} - {formatTimestamp(paragraph.end)}
-                </p>
-              </div>
-            )) || (
-              <p>
-                {transcription.channels?.[0]?.alternatives?.[0]?.transcript || 
-                 "No transcription data available. The format might be different than expected."}
-              </p>
-            )}
-          </div>
         </div>
       )}
     </div>
