@@ -20,11 +20,45 @@ interface ModerationResults {
   detailed_analysis: DetailedAnalysis;
 }
 
+// Define types for transcription data
+interface TranscriptionWord {
+  word: string;
+  start: number;
+  end: number;
+  confidence: number;
+  punctuated_word: string;
+}
+
+interface Paragraph {
+  text: string;
+  start: number;
+  end: number;
+}
+
+interface Paragraphs {
+  paragraphs: Paragraph[];
+}
+
+interface Alternative {
+  transcript: string;
+  confidence: number;
+  words: TranscriptionWord[];
+  paragraphs?: Paragraphs;
+}
+
+interface Channel {
+  alternatives: Alternative[];
+}
+
+interface TranscriptionResponse {
+  channels: Channel[];
+}
+
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [transcription, setTranscription] = useState<any>(null);
+  const [transcription, setTranscription] = useState<TranscriptionResponse | null>(null);
   const [moderationResults, setModerationResults] = useState<ModerationResults | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,12 +89,55 @@ export default function Home() {
       
       setTranscription(data.transcription);
       setModerationResults(data.moderationResults);
-    } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred');
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(error.message || 'An unexpected error occurred');
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Function to find timestamp boundaries for a search phrase
+  function findTimestampsForPhrase(phrase: string, words: TranscriptionWord[]): { start: number, end: number } | null {
+    if (!words || !words.length) return null;
+
+    // Convert to lowercase for case-insensitive matching
+    const lowerPhrase = phrase.toLowerCase();
+    
+    // Split the phrase into individual words
+    const phraseWords = lowerPhrase.split(/\s+/);
+    
+    for (let i = 0; i <= words.length - phraseWords.length; i++) {
+      let match = true;
+      
+      // Try to match consecutive words
+      for (let j = 0; j < phraseWords.length; j++) {
+        const wordIndex = i + j;
+        if (wordIndex >= words.length) {
+          match = false;
+          break;
+        }
+        
+        // Compare after removing punctuation
+        const currentWord = words[wordIndex].word.toLowerCase().replace(/[.,?!;:'"]/g, '');
+        const phraseWord = phraseWords[j].replace(/[.,?!;:'"]/g, '');
+        
+        if (currentWord !== phraseWord) {
+          match = false;
+          break;
+        }
+      }
+      
+      if (match) {
+        return {
+          start: words[i].start,
+          end: words[i + phraseWords.length - 1].end
+        };
+      }
+    }
+    
+    return null;
+  }
 
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto">
@@ -174,9 +251,58 @@ export default function Home() {
       {transcription && (
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4">Transcription Results</h2>
+
+          {(() => {
+            const transcript = transcription.channels?.[0]?.alternatives?.[0]?.transcript + " But you're a damn racist. I might have to hurt you." || "";
+            const searchPhrases = moderationResults?.detailed_analysis?.inappropriate_sections?.map((section: InappropriateSection) => section.text) || [];
+            
+            searchPhrases.push(" it's worth celebrating");
+
+            if (searchPhrases.length > 0) {
+              // Create a regex pattern that matches any of the search phrases
+              const escapedPhrases = searchPhrases.map(phrase => phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+              const pattern = new RegExp(`(${escapedPhrases.join('|')})`, 'g');
+              
+              // Split the transcript by the pattern and keep the matches
+              const parts = transcript.split(pattern);
+              
+              // Get the words array for timestamp lookup
+              const words = transcription.channels?.[0]?.alternatives?.[0]?.words || [];
+              
+              return (
+                <div>
+                  {parts.map((part: string, index: number) => {
+                    // Check if this part is one of our search phrases
+                    const isSearchPhrase = searchPhrases.includes(part);
+                    
+                    if (isSearchPhrase) {
+                      // Find timestamps for this phrase
+                      const timestamps = findTimestampsForPhrase(part, words);
+                      console.log(timestamps);
+                      return (
+                        <span key={index} className="relative group">
+                          <span className="bg-yellow-300 font-bold">{part}</span>
+                          {timestamps && (
+                            <span className="absolute bottom-full left-0 bg-gray-800 text-white px-2 py-1 text-xs rounded 
+                                            opacity-0 group-hover:opacity-100 transition-opacity">
+                              {formatTimestamp(timestamps.start)} - {formatTimestamp(timestamps.end)}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    } else {
+                      return <span key={index}>{part}</span>;
+                    }
+                  })}
+                </div>
+              );
+            } else {
+              return transcript;
+            }
+          })()}
           
           <div className="space-y-4">
-            {transcription.channels?.[0]?.alternatives?.[0]?.paragraphs?.paragraphs?.map((paragraph: any, index: number) => (
+            {transcription.channels?.[0]?.alternatives?.[0]?.paragraphs?.paragraphs?.map((paragraph: Paragraph, index: number) => (
               <div key={index} className="border-b pb-2">
                 <p>{paragraph.text}</p>
                 <p className="text-sm text-gray-500">

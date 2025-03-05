@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     // For a more detailed analysis, let's also use the Chat API to get specific feedback
     // about what might be inappropriate and highlight those sections
     const detailedAnalysis = await openai.chat.completions.create({
-      model: "gpt-4-turbo",
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
