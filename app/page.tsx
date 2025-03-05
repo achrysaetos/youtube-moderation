@@ -196,14 +196,14 @@ export default function Home() {
           <h2 className="text-xl font-semibold mb-4">Content Moderation Results</h2>
           
           <div className="space-y-4">
-            <div className="flex items-center">
+            {/* <div className="flex items-center">
               <div className={`h-4 w-4 rounded-full mr-2 ${moderationResults.flagged ? 'bg-red-500' : 'bg-green-500'}`}></div>
               <p className="font-medium">
                 {moderationResults.flagged 
                   ? 'Potentially inappropriate content detected' 
                   : 'No inappropriate content detected'}
               </p>
-            </div>
+            </div> */}
             
             {moderationResults.flagged && (
               <div>
@@ -253,11 +253,9 @@ export default function Home() {
           <h2 className="text-xl font-semibold mb-4">Transcription Results</h2>
 
           {(() => {
-            const transcript = transcription.channels?.[0]?.alternatives?.[0]?.transcript + " But you're a damn racist. I might have to hurt you." || "";
+            const transcript = transcription.channels?.[0]?.alternatives?.[0]?.transcript || "";
             const searchPhrases = moderationResults?.detailed_analysis?.inappropriate_sections?.map((section: InappropriateSection) => section.text) || [];
             
-            searchPhrases.push(" it's worth celebrating");
-
             if (searchPhrases.length > 0) {
               // Create a regex pattern that matches any of the search phrases
               const escapedPhrases = searchPhrases.map(phrase => phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));

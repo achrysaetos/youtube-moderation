@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
   try {
     const { transcript } = await request.json();
 
-    const addendum = "But you're a damn racist. I might have to hurt you.";
+    const addendum = "";
 
     if (!transcript) {
       return NextResponse.json({ error: 'Transcript is required' }, { status: 400 });
