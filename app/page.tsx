@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 // Define types for moderation results
 interface InappropriateSection {
@@ -54,25 +54,165 @@ interface TranscriptionResponse {
   channels: Channel[];
 }
 
+// Add types for the audio player
+interface AudioPlayerProps {
+  audioUrl: string;
+  activeTimestamp: number | null;
+}
+
+// Add a type for WaveSurfer to fix linting issues
+type WaveSurferType = {
+  load: (url: string) => void;
+  on: (event: string, callback: () => void) => void;
+  getDuration: () => number;
+  getCurrentTime: () => number;
+  play: () => void;
+  pause: () => void;
+  destroy: () => void;
+  seekTo: (progress: number) => void;
+};
+
+// Create the AudioPlayer component using wavesurfer.js
+function AudioPlayer({ audioUrl, activeTimestamp }: AudioPlayerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const wavesurferRef = useRef<WaveSurferType | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  
+  // Initialize WaveSurfer
+  useEffect(() => {
+    let wavesurfer: WaveSurferType | null = null;
+    
+    const initWavesurfer = async () => {
+      if (!containerRef.current) return;
+      
+      try {
+        // Dynamically import wavesurfer.js
+        const WaveSurfer = (await import('wavesurfer.js')).default;
+        
+        // Create WaveSurfer instance with type assertion for options
+        wavesurfer = WaveSurfer.create({
+          container: containerRef.current,
+          waveColor: '#4F46E5',
+          progressColor: '#818CF8',
+          cursorColor: '#4F46E5',
+          barWidth: 2,
+          barGap: 1,
+          barRadius: 2,
+          height: 60,
+          normalize: true,
+          // @ts-expect-error - responsive is a valid option but not in TypeScript definitions
+          responsive: true,
+        }) as WaveSurferType;
+        
+        // Load audio
+        wavesurfer.load(audioUrl);
+        
+        // Set up event handlers
+        wavesurfer.on('ready', () => {
+          wavesurferRef.current = wavesurfer;
+          if (wavesurfer) {
+            setDuration(wavesurfer.getDuration());
+          }
+        });
+        
+        wavesurfer.on('audioprocess', () => {
+          if (wavesurfer) {
+            setCurrentTime(wavesurfer.getCurrentTime());
+          }
+        });
+        
+        wavesurfer.on('play', () => {
+          setIsPlaying(true);
+        });
+        
+        wavesurfer.on('pause', () => {
+          setIsPlaying(false);
+        });
+        
+        wavesurfer.on('finish', () => {
+          setIsPlaying(false);
+        });
+      } catch (err) {
+        console.error('Error initializing WaveSurfer:', err);
+      }
+    };
+    
+    initWavesurfer();
+    
+    // Clean up
+    return () => {
+      if (wavesurfer) {
+        try {
+          wavesurfer.destroy();
+        } catch (err) {
+          console.error('Error destroying WaveSurfer instance:', err);
+        }
+      }
+    };
+  }, [audioUrl]);
+  
+  // Handle active timestamp changes
+  useEffect(() => {
+    if (wavesurferRef.current && activeTimestamp !== null) {
+      wavesurferRef.current.seekTo(activeTimestamp / duration);
+      wavesurferRef.current.play();
+    }
+  }, [activeTimestamp, duration]);
+  
+  // Play/pause toggle
+  const togglePlayPause = () => {
+    if (!wavesurferRef.current) return;
+    
+    if (isPlaying) {
+      wavesurferRef.current.pause();
+    } else {
+      wavesurferRef.current.play();
+    }
+  };
+  
+  return (
+    <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+      <h2 className="text-xl font-semibold mb-4">Audio Player</h2>
+      
+      <div className="mb-4">
+        <div ref={containerRef} className="mb-3" />
+        
+        <div className="flex items-center justify-between">
+          <button 
+            onClick={togglePlayPause}
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+          >
+            {isPlaying ? 'Pause' : 'Play'}
+          </button>
+          
+          <div className="text-gray-600">
+            {formatTimestamp(currentTime)} / {formatTimestamp(duration)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [transcription, setTranscription] = useState<TranscriptionResponse | null>(null);
   const [moderationResults, setModerationResults] = useState<ModerationResults | null>(null);
+  // Add state for the audio URL
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   // Add state for the currently active timestamp
-  const [activeTimestamp, setActiveTimestamp] = useState<{
-    time: number;
-    text: string;
-    reason: string;
-    severity: string;
-  } | null>(null);
+  const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
 
-  // Set up an effect to listen for timestamp navigation events
+  // Set up an effect to handle direct timestamp navigation
   useEffect(() => {
     const handleTimestampNavigation = (event: Event) => {
       const customEvent = event as CustomEvent;
-      setActiveTimestamp(customEvent.detail);
+      // Instead of storing all metadata, we just need the timestamp
+      setActiveTimestamp(customEvent.detail.time);
     };
 
     document.addEventListener('navigate-to-timestamp', handleTimestampNavigation);
@@ -84,16 +224,20 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+    setTranscription(null);
+    setModerationResults(null);
+    setAudioUrl(null);
+    setActiveTimestamp(null);
     
     if (!youtubeUrl) {
       setError('Please enter a YouTube URL');
       return;
     }
     
+    setIsLoading(true);
+    
     try {
-      setIsLoading(true);
-      setError(null);
-      
       const response = await fetch('/api/transcribe', {
         method: 'POST',
         headers: {
@@ -110,6 +254,7 @@ export default function Home() {
       
       setTranscription(data.transcription);
       setModerationResults(data.moderationResults);
+      setAudioUrl(data.audioUrl || null);
     } catch (err: unknown) {
       const error = err as Error;
       setError(error.message || 'An unexpected error occurred');
@@ -257,57 +402,12 @@ export default function Home() {
         )}
       </div>
 
-      {/* Add the TimestampNavigator component */}
-      {activeTimestamp && (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6 border-l-4 border-yellow-500">
-          <h2 className="text-xl font-semibold mb-2">
-            <span className="flex items-center">
-              <span className="mr-2">🔍</span> 
-              Current Highlight
-            </span>
-          </h2>
-          
-          <div className="mb-3">
-            <p className="font-medium text-gray-700 mb-1">
-              <span className="bg-yellow-200 px-2 py-1 rounded">{activeTimestamp.text}</span>
-            </p>
-            <p className="text-sm text-gray-600 mb-1">
-              <span className="font-semibold">Timestamp:</span> {formatTimestamp(activeTimestamp.time)}
-            </p>
-            <p className="text-sm text-gray-600 mb-1">
-              <span className="font-semibold">Reason:</span> {activeTimestamp.reason}
-            </p>
-            <div className="flex items-center">
-              <span className="text-sm font-semibold text-gray-600 mr-2">Severity:</span>
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                activeTimestamp.severity === 'high' ? 'bg-red-600 text-white' :
-                activeTimestamp.severity === 'medium' ? 'bg-yellow-500 text-white' :
-                'bg-yellow-200 text-gray-800'
-              }`}>
-                {activeTimestamp.severity.charAt(0).toUpperCase() + activeTimestamp.severity.slice(1)}
-              </span>
-            </div>
-          </div>
-          
-          <div className="flex space-x-2">
-            <button 
-              onClick={() => {
-                // Here you would typically control an audio/video player
-                // For now, we just clear the active timestamp
-                setActiveTimestamp(null);
-              }}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-            >
-              Play from this point
-            </button>
-            <button 
-              onClick={() => setActiveTimestamp(null)}
-              className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
+      {/* Add the AudioPlayer if we have an audio URL */}
+      {audioUrl && (
+        <AudioPlayer 
+          audioUrl={audioUrl} 
+          activeTimestamp={activeTimestamp} 
+        />
       )}
 
       {isLoading && (
@@ -419,6 +519,8 @@ export default function Home() {
                               const timestampEvent = new CustomEvent('navigate-to-timestamp', {
                                 detail: { 
                                   time: timestamps.start,
+                                  // We still send these details for debugging purposes
+                                  // but we won't use them for displaying a component
                                   text: part,
                                   reason: section?.reason || 'Flagged content',
                                   severity: section?.severity || 'medium'
