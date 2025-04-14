@@ -322,8 +322,6 @@ export default function Home() {
         )}
       </div>
 
-      {audioUrl && <AudioPlayer audioUrl={audioUrl} activeTimestamp={activeTimestamp} />}
-
       {isLoading && (
         <div className="text-center p-8">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto mb-4"></div>
@@ -379,6 +377,8 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {audioUrl && <AudioPlayer audioUrl={audioUrl} activeTimestamp={activeTimestamp} />}
 
       {transcription && (
         <div className="bg-white rounded-lg shadow-md p-6">
