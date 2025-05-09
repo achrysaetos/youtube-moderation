@@ -62,17 +62,17 @@ function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTi
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  
+
   // Initialize WaveSurfer
   useEffect(() => {
     let wavesurfer: WaveSurferType | null = null;
-    
+
     const initWavesurfer = async () => {
       if (!containerRef.current) return;
-      
+
       try {
         const WaveSurfer = (await import('wavesurfer.js')).default;
-        
+
         wavesurfer = WaveSurfer.create({
           container: containerRef.current,
           waveColor: '#4F46E5',
@@ -86,18 +86,18 @@ function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTi
           // @ts-expect-error - responsive is a valid option but not in TypeScript definitions
           responsive: true,
         }) as WaveSurferType;
-        
+
         wavesurfer.load(audioUrl);
-        
+
         wavesurfer.on('ready', () => {
           wavesurferRef.current = wavesurfer;
           if (wavesurfer) setDuration(wavesurfer.getDuration());
         });
-        
+
         wavesurfer.on('audioprocess', () => {
           if (wavesurfer) setCurrentTime(wavesurfer.getCurrentTime());
         });
-        
+
         wavesurfer.on('play', () => setIsPlaying(true));
         wavesurfer.on('pause', () => setIsPlaying(false));
         wavesurfer.on('finish', () => setIsPlaying(false));
@@ -105,9 +105,9 @@ function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTi
         console.error('Error initializing WaveSurfer:', err);
       }
     };
-    
+
     initWavesurfer();
-    
+
     return () => {
       if (wavesurfer) {
         try {
@@ -118,7 +118,7 @@ function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTi
       }
     };
   }, [audioUrl]);
-  
+
   // Handle active timestamp changes
   useEffect(() => {
     if (wavesurferRef.current && activeTimestamp !== null) {
@@ -126,7 +126,7 @@ function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTi
       wavesurferRef.current.play();
     }
   }, [activeTimestamp, duration]);
-  
+
   // Play/pause toggle
   const togglePlayPause = () => {
     if (!wavesurferRef.current) return;
@@ -136,14 +136,14 @@ function AudioPlayer({ audioUrl, activeTimestamp }: { audioUrl: string; activeTi
       wavesurferRef.current.play();
     }
   };
-  
+
   return (
     <div className="bg-white rounded-lg shadow-md p-6 mb-6">
       <h2 className="text-xl font-semibold mb-4">Audio Player</h2>
       <div className="mb-4">
         <div ref={containerRef} className="mb-3" />
         <div className="flex items-center justify-between">
-          <button 
+          <button
             onClick={togglePlayPause}
             className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
           >
@@ -173,6 +173,7 @@ export default function Home() {
   const [moderationResults, setModerationResults] = useState<ModerationResults | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
+  const [showCleanDetails, setShowCleanDetails] = useState<boolean>(false);
 
   // Handle timestamp navigation events
   useEffect(() => {
@@ -199,35 +200,35 @@ export default function Home() {
       ...w,
       normalized: w.word.toLowerCase().replace(/[.,?!;:'"]/g, '')
     }));
-    
+
     // Find phrase in transcript
     for (let i = 0; i <= normalizedWords.length - phraseWords.length; i++) {
       let matchCount = 0;
       let fuzzyMatched = false;
-      
+
       for (let j = 0; j < phraseWords.length; j++) {
         const wordIndex = i + j;
         if (wordIndex >= normalizedWords.length) break;
-        
+
         const transcriptWord = normalizedWords[wordIndex].normalized;
         const phraseWord = phraseWords[j];
-        
+
         // Check for exact match
         if (transcriptWord === phraseWord) {
           matchCount++;
           continue;
         }
-        
+
         // Simpler fuzzy matching - just check for substring inclusion
         if (transcriptWord.includes(phraseWord) || phraseWord.includes(transcriptWord)) {
           matchCount++;
           fuzzyMatched = true;
           continue;
         }
-        
+
         break;
       }
-      
+
       // If we've matched all words (or at least 80% for fuzzy matching)
       const threshold = fuzzyMatched ? 0.8 * phraseWords.length : phraseWords.length;
       if (matchCount >= threshold) {
@@ -237,7 +238,7 @@ export default function Home() {
         };
       }
     }
-    
+
     return null;
   }
 
@@ -249,27 +250,28 @@ export default function Home() {
     setModerationResults(null);
     setAudioUrl(null);
     setActiveTimestamp(null);
-    
+    setShowCleanDetails(false);
+
     if (!youtubeUrl) {
       setError('Please enter a YouTube URL');
       return;
     }
-    
+
     setIsLoading(true);
-    
+
     try {
       const response = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ youtubeUrl }),
       });
-      
+
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw new Error(data.error || 'Failed to transcribe video');
       }
-      
+
       setTranscription(data.transcription);
       setModerationResults(data.moderationResults);
       setAudioUrl(data.audioUrl || null);
@@ -307,14 +309,13 @@ export default function Home() {
           <button
             type="submit"
             disabled={isLoading}
-            className={`w-full py-2 px-4 rounded-md font-medium text-white ${
-              isLoading ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'
-            }`}
+            className={`w-full py-2 px-4 rounded-md font-medium text-white ${isLoading ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
           >
             {isLoading ? 'Processing...' : 'Transcribe & Moderate Video'}
           </button>
         </form>
-        
+
         {error && (
           <div className="mt-4 p-3 bg-red-100 text-red-700 rounded-md">
             <p>{error}</p>
@@ -336,43 +337,77 @@ export default function Home() {
           <h2 className="text-xl font-semibold mb-4">Content Moderation Results</h2>
           <div className="space-y-4">
             {moderationResults.flagged && (
-              <div>
-                <h3 className="font-medium mt-4 mb-2">Categories detected:</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(moderationResults.categories).map(([category, value]) => 
-                    value ? (
-                      <div key={category} className="bg-red-50 p-2 rounded">
-                        <p className="font-medium text-red-700 capitalize">{category.replace(/-/g, ' ')}</p>
-                        <p className="text-sm text-gray-700">
-                          Score: {(moderationResults.category_scores[category] * 100).toFixed(2)}%
-                        </p>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {moderationResults.detailed_analysis?.inappropriate_sections?.length > 0 && (
-              <div className="mt-4">
-                <h3 className="font-medium mb-2">Detailed Analysis:</h3>
-                {moderationResults.detailed_analysis.inappropriate_sections.map((section, index) => (
-                  <div key={index} className="border-l-4 border-red-500 pl-3 py-2 mb-3 bg-red-50">
-                    <p className="font-medium">{section.text}</p>
-                    <p className="text-sm text-gray-700">Reason: {section.reason}</p>
-                    <div className="flex items-center mt-1">
-                      <span className="text-xs font-medium mr-2">Severity:</span>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        section.severity === 'high' ? 'bg-red-600 text-white' :
-                        section.severity === 'medium' ? 'bg-orange-500 text-white' :
-                        'bg-yellow-400 text-gray-800'
-                      }`}>
-                        {section.severity.toUpperCase()}
-                      </span>
-                    </div>
+              <>
+                <div>
+                  <h3 className="font-medium mt-4 mb-2">Categories detected:</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(moderationResults.categories).map(([category, value]) =>
+                      value ? (
+                        <div key={category} className="bg-red-50 p-2 rounded">
+                          <p className="font-medium text-red-700 capitalize">{category.replace(/-/g, ' ')}</p>
+                          <p className="text-sm text-gray-700">
+                            Score: {(moderationResults.category_scores[category] * 100).toFixed(2)}%
+                          </p>
+                        </div>
+                      ) : null
+                    )}
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {moderationResults.detailed_analysis?.inappropriate_sections?.length > 0 && (
+                  <div className="mt-4">
+                    <h3 className="font-medium mb-2">Detailed Analysis of Inappropriate Sections:</h3>
+                    {moderationResults.detailed_analysis.inappropriate_sections.map((section, index) => (
+                      <div key={index} className="border-l-4 border-red-500 pl-3 py-2 mb-3 bg-red-50">
+                        <p className="font-medium">{section.text}</p>
+                        <p className="text-sm text-gray-700">Reason: {section.reason}</p>
+                        <div className="flex items-center mt-1">
+                          <span className="text-xs font-medium mr-2">Severity:</span>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${section.severity === 'high' ? 'bg-red-600 text-white' :
+                              section.severity === 'medium' ? 'bg-orange-500 text-white' :
+                                'bg-yellow-400 text-gray-800'
+                            }`}>
+                            {section.severity.toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {!moderationResults.flagged && (
+              <>
+                <div
+                  className="p-3 bg-green-50 text-green-700 rounded-md cursor-pointer hover:bg-green-100 transition-colors"
+                  onClick={() => setShowCleanDetails(!showCleanDetails)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setShowCleanDetails(!showCleanDetails); }}
+                >
+                  <p>No problematic content detected. {showCleanDetails ? '▲ Hide Details' : '▼ Show Details'}</p>
+                </div>
+
+                {showCleanDetails && (
+                  <div className="mt-4 p-4 border rounded-md bg-gray-50 text-sm">
+                    <h4 className="font-semibold text-gray-700 mb-3">Breakdown of All Category Scores:</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2">
+                      {Object.entries(moderationResults.category_scores)
+                        .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+                        .map(([category, score]) => (
+                          <div key={category} className="flex justify-between items-center py-1 border-b border-gray-200 last:border-b-0">
+                            <span className="text-gray-600 capitalize">{category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</span>
+                            <span className="font-medium text-gray-800">{(score * 100).toFixed(2)}%</span>
+                          </div>
+                        ))}
+                    </div>
+                    {(!moderationResults.detailed_analysis?.inappropriate_sections || moderationResults.detailed_analysis.inappropriate_sections.length === 0) && (
+                      <p className="mt-4 text-xs text-gray-500 italic">Note: Detailed analysis for inappropriate sections is empty as no specific issues were found by the primary check.</p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -386,32 +421,32 @@ export default function Home() {
           {(() => {
             const transcript = transcription.channels?.[0]?.alternatives?.[0]?.transcript || "";
             const searchPhrases = moderationResults?.detailed_analysis?.inappropriate_sections?.map(section => section.text) || [];
-            
+
             if (searchPhrases.length > 0) {
               // Create regex pattern for search phrases
               const escapedPhrases = searchPhrases.map(phrase => phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
               const pattern = new RegExp(`(${escapedPhrases.join('|')})`, 'g');
               const parts = transcript.split(pattern);
               const words = transcription.channels?.[0]?.alternatives?.[0]?.words || [];
-              
+
               return (
                 <div>
                   {parts.map((part, index) => {
                     const isSearchPhrase = searchPhrases.includes(part);
-                    
+
                     if (isSearchPhrase) {
                       const timestamps = findTimestampsForPhrase(part, words);
                       return (
-                        <span 
-                          key={index} 
+                        <span
+                          key={index}
                           className="relative group inline-block"
                           onClick={() => {
                             if (timestamps) {
                               const sectionIndex = searchPhrases.indexOf(part);
                               const section = moderationResults?.detailed_analysis?.inappropriate_sections?.[sectionIndex];
-                              
+
                               const timestampEvent = new CustomEvent('navigate-to-timestamp', {
-                                detail: { 
+                                detail: {
                                   time: timestamps.start,
                                   text: part,
                                   reason: section?.reason || 'Flagged content',
