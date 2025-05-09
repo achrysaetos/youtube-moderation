@@ -1,8 +1,11 @@
-# Transcript Parser with Content Moderation
+   
+<div align="center">
+  <img width="400" alt="image" src="https://github.com/user-attachments/assets/f929b100-384d-491f-8438-80bca6191935" />
+</div>
+
+# Overview
 
 This is a Next.js application that transcribes YouTube videos using Deepgram's API and then analyzes the transcript for inappropriate content using OpenAI's moderation API.
-
-<img width="1032" alt="image" src="https://github.com/user-attachments/assets/81bb7404-0854-4578-9e43-9581dbc159ee" />
 
 ## Features
 
@@ -10,6 +13,11 @@ This is a Next.js application that transcribes YouTube videos using Deepgram's A
 - Moderate content for inappropriate language using OpenAI's moderation API
 - Detailed analysis of problematic content with severity ratings
 - Clean and intuitive UI
+
+
+## Example
+
+<img width="1032" alt="image" src="https://github.com/user-attachments/assets/81bb7404-0854-4578-9e43-9581dbc159ee" />
 
 ## How It Works
 
