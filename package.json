@@ -17,7 +17,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "wavesurfer.js": "^7.9.1",
-    "ytdl-core": "npm:@distube/ytdl-core@^4.16.4"
+    "yt-dlp-wrap": "^2.3.12"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
