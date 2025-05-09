@@ -6,8 +6,8 @@ import { mkdir, access, readFile, writeFile } from 'fs/promises';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 
-// @ts-expect-error - ytdl-core doesn't have proper TypeScript types
-import ytdl from 'ytdl-core';
+// import ytdl from 'ytdl-core';
+import YTDlpWrap from 'yt-dlp-wrap';
 
 // Convert callback-based fs functions to Promise-based
 const unlink = promisify(fs.unlink);
@@ -15,6 +15,10 @@ const unlink = promisify(fs.unlink);
 // Define paths
 const tempDir = path.join(process.cwd(), 'temp');
 const publicDir = path.join(process.cwd(), 'public', 'audio');
+
+// Initialize yt-dlp-wrap
+const ytDlpWrap = new YTDlpWrap();
+let isYtDlpDownloaded = false;
 
 // Interfaces
 interface DeepgramTranscriptionResult {
@@ -46,12 +50,12 @@ interface AudioFormat {
 async function transcribeAudio(audioFilePath: string): Promise<DeepgramTranscriptionResult> {
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY || '');
   const audioStream = fs.createReadStream(audioFilePath);
-  
+
   audioStream.on('error', (err: Error) => {
     console.error('Error reading audio file:', err);
     throw err;
   });
-  
+
   const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
     audioStream,
     {
@@ -59,55 +63,42 @@ async function transcribeAudio(audioFilePath: string): Promise<DeepgramTranscrip
       smart_format: true,
     }
   );
-  
+
   if (error) {
     console.error('Deepgram transcription error:', error);
     throw error;
   }
-  
+
   return result;
 }
 
 // Download YouTube audio and transcribe it
-async function transcribeYouTubeUrl(youtubeUrl: string): Promise<{result: DeepgramTranscriptionResult, audioUrl: string}> {
-  if (!ytdl.validateURL(youtubeUrl)) {
-    throw new Error('Invalid YouTube URL provided');
-  }
-  
+async function transcribeYouTubeUrl(youtubeUrl: string): Promise<{ result: DeepgramTranscriptionResult, audioUrl: string }> {
+  // if (!ytdl.validateURL(youtubeUrl)) {
+  //   throw new Error(\'Invalid YouTube URL provided\');
+  // }
+
   let audioFilePath = '';
-  
+
   try {
     // Create directories if they don't exist
     await createDirectoriesIfNeeded();
-    
+
     // Generate filenames
     const audioId = randomUUID();
     const audioFileName = `${audioId}.mp3`;
     audioFilePath = path.join(tempDir, audioFileName);
     const publicAudioPath = path.join(publicDir, audioFileName);
-    
+
     // Get video info
-    const info = await ytdl.getInfo(youtubeUrl, {
-      requestOptions: {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        }
-      }
-    });
-    
-    // Find best audio format
-    const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
-    if (audioFormats.length === 0) {
-      throw new Error('No audio formats found for this video');
-    }
-    
-    const audioFormat = audioFormats.reduce((prev: AudioFormat, curr: AudioFormat) => {
-      return (prev.audioBitrate || 0) > (curr.audioBitrate || 0) ? prev : curr;
-    });
-    
+    const info = await ytDlpWrap.getVideoInfo(youtubeUrl);
+    console.log('Video info obtained:', info.title);
+
     // Download audio and get transcription
-    const { result, audioUrl } = await downloadAndTranscribe(info, audioFormat, audioFilePath, publicAudioPath, audioFileName);
+    // The info object might be useful for metadata, but downloadAndTranscribe will use youtubeUrl for the download
+    const { result, audioUrl } = await downloadAndTranscribe(youtubeUrl, audioFilePath, publicAudioPath, audioFileName);
     return { result, audioUrl };
+
   } catch (err) {
     // Clean up on error
     if (audioFilePath && fs.existsSync(audioFilePath)) {
@@ -117,7 +108,7 @@ async function transcribeYouTubeUrl(youtubeUrl: string): Promise<{result: Deepgr
         console.error('Failed to clean up audio file:', cleanupErr);
       }
     }
-    
+
     throw err instanceof Error ? err : new Error(String(err));
   }
 }
@@ -129,7 +120,7 @@ async function createDirectoriesIfNeeded(): Promise<void> {
   } catch {
     await mkdir(tempDir, { recursive: true });
   }
-  
+
   try {
     await mkdir(publicDir, { recursive: true });
   } catch (err) {
@@ -139,41 +130,48 @@ async function createDirectoriesIfNeeded(): Promise<void> {
 
 // Helper function to download audio and transcribe it
 async function downloadAndTranscribe(
-  info: ytdl.videoInfo, 
-  audioFormat: AudioFormat, 
+  // info: any, // Placeholder for yt-dlp info type 
+  // audioFormat: AudioFormat, 
+  youtubeUrl: string, // Pass youtubeUrl directly
   audioFilePath: string,
   publicAudioPath: string,
   audioFileName: string
 ): Promise<{ result: DeepgramTranscriptionResult, audioUrl: string }> {
   const writeStream = fs.createWriteStream(audioFilePath);
-  
+
   return new Promise((resolve, reject) => {
-    const stream = ytdl.downloadFromInfo(info, { format: audioFormat });
-    
+    const stream = ytDlpWrap.execStream([
+      youtubeUrl, // Use the direct URL
+      '-f',
+      'bestaudio/best', // yt-dlp format selection for best audio
+      '-o',
+      '-' // Output to stdout to pipe it
+    ]);
+
     stream.on('error', (err: Error) => {
-      console.error('Error downloading YouTube audio:', err);
+      console.error('Error downloading YouTube audio with yt-dlp-wrap:', err);
       reject(new Error(`Download failed: ${err.message}`));
     });
-    
+
     stream.pipe(writeStream);
-    
+
     writeStream.on('finish', async () => {
       try {
         // Copy to public directory for web access
         const fileData = await readFile(audioFilePath);
         await writeFile(publicAudioPath, fileData);
-        
+
         // Transcribe audio
         const result = await transcribeAudio(audioFilePath);
         const audioUrl = `/audio/${audioFileName}`;
-        
+
         resolve({ result, audioUrl });
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         reject(new Error(`Processing failed: ${error.message}`));
       }
     });
-    
+
     writeStream.on('error', (err: Error) => {
       reject(new Error(`File write error: ${err.message}`));
     });
@@ -192,26 +190,49 @@ export const config = {
 
 export async function POST(request: NextRequest) {
   try {
+    // Ensure yt-dlp is available
+    if (!isYtDlpDownloaded) {
+      try {
+        await ytDlpWrap.getVersion();
+        isYtDlpDownloaded = true;
+        console.log('yt-dlp found in PATH');
+      } catch (e) {
+        console.log('yt-dlp not found in PATH, attempting to download...');
+        try {
+          await YTDlpWrap.downloadFromGithub(); // Downloads to ./yt-dlp by default
+          ytDlpWrap.setBinaryPath('./yt-dlp');
+          isYtDlpDownloaded = true;
+          console.log('yt-dlp downloaded successfully and path set.');
+        } catch (downloadError) {
+          console.error('Failed to download yt-dlp:', downloadError);
+          // If download fails, we might not be able to proceed.
+          // Depending on requirements, could throw error or try to use a system-installed version if path was the issue.
+          return NextResponse.json({ error: 'Failed to initialize video downloader.' }, { status: 500 });
+        }
+      }
+    }
+
     const { youtubeUrl } = await request.json();
 
     if (!youtubeUrl) {
       return NextResponse.json({ error: 'YouTube URL is required' }, { status: 400 });
     }
 
-    if (!ytdl.validateURL(youtubeUrl)) {
-      return NextResponse.json({ error: 'Invalid YouTube URL' }, { status: 400 });
-    }
+    // if (!ytdl.validateURL(youtubeUrl)) {
+    //   return NextResponse.json({ error: 'Invalid YouTube URL' }, { status: 400 });
+    // }
 
     // Get video info and transcribe
-    const videoInfo = await ytdl.getBasicInfo(youtubeUrl);
-    console.log("Video title:", videoInfo.videoDetails.title);
-    
+    // const videoInfo = await ytdl.getBasicInfo(youtubeUrl);
+    const videoInfo = await ytDlpWrap.getVideoInfo(youtubeUrl);
+    console.log("Video title:", videoInfo.title); // Access title directly if available
+
     const { result: transcriptionResult, audioUrl } = await transcribeYouTubeUrl(youtubeUrl);
-    
+
     // Get transcript text
-    const transcriptText = transcriptionResult?.results?.channels?.[0]?.alternatives?.[0]?.transcript || 
-                          "No transcript was generated.";
-    
+    const transcriptText = transcriptionResult?.results?.channels?.[0]?.alternatives?.[0]?.transcript ||
+      "No transcript was generated.";
+
     // Call moderation API
     const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
     const moderationResponse = await fetch(`${baseUrl}/api/moderate`, {
@@ -219,9 +240,9 @@ export async function POST(request: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcript: transcriptText }),
     });
-    
+
     const moderationData = await moderationResponse.json();
-    
+
     // Return combined results
     return NextResponse.json({
       transcription: {
